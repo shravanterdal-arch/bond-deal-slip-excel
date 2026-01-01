@@ -4,11 +4,12 @@ import pandas as pd
 import re
 from io import BytesIO
 
+# -------------------- PAGE SETUP --------------------
 st.set_page_config(page_title="Bond Deal Slip → Excel", layout="centered")
-
 st.title("📄 Bond Deal Slip → 📊 Excel")
 st.caption("Supports mixed BSE (NDS-RST) and CBRICS deal slips")
 
+# -------------------- HELPERS --------------------
 def grab(pattern, text):
     m = re.search(pattern, text, re.DOTALL)
     return m.group(1).strip() if m else ""
@@ -25,6 +26,7 @@ def safe_int(val):
     except:
         return ""
 
+# -------------------- BSE PARSER --------------------
 def parse_bse(text):
     trade_value = safe_float(grab(r"TRADE VALUE\s+([\d.]+)", text))
     quantity = safe_int(grab(r"QUANTITY\s+(\d+)", text))
@@ -47,6 +49,7 @@ def parse_bse(text):
         "YIELD(%)": safe_float(grab(r"YIELD\(%\)\s+([\d.]+)", text)),
     }
 
+# -------------------- CBRICS PARSER --------------------
 def parse_cbrics(text):
     return {
         "Deal Reference": grab(r"CBRICS Transaction Id\s+(\d+)", text),
@@ -66,6 +69,7 @@ def parse_cbrics(text):
         "YIELD(%)": safe_float(grab(r"Yield\s+([\d.]+)", text)),
     }
 
+# -------------------- UI --------------------
 uploaded_files = st.file_uploader(
     "Upload deal slip PDFs (BSE + CBRICS mixed)",
     type=["pdf"],
