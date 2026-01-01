@@ -13,8 +13,18 @@ st.title("📄 Bond Deal Slip → 📊 Excel")
 st.caption("Supports mixed BSE (NDS-RST) and CBRICS deal slips")
 
 def grab(pattern, text):
-    m = re.search(pattern, text, re.DOTALL)
-    return m.group(1).strip() if m else ""
+    def safe_float(val):
+    try:
+        return float(val.replace(",", ""))
+    except:
+        return ""
+
+def safe_int(val):
+    try:
+        return int(val)
+    except:
+        return ""
+
 
 def parse_bse(text):
     trade_value = float(grab(r"TRADE VALUE\s+([\d.]+)", text))
@@ -35,23 +45,25 @@ def parse_bse(text):
     }
 
 def parse_cbrics(text):
+   def parse_cbrics(text):
     return {
         "Deal Reference": grab(r"CBRICS Transaction Id\s+(\d+)", text),
         "Buyer": grab(r"Participant\s+([A-Z0-9]+)", text),
         "Seller": grab(r"Counter Party\s+([A-Z0-9]+)", text),
         "Bond": grab(r"Description\s+(.+)", text),
         "ISIN": grab(r"ISIN\s+(\S+)", text),
-        "Quantity": int(grab(r"No\. Of Bond.*?\n(\d+)", text)),
+        "Quantity": safe_int(grab(r"No\. Of Bond.*?\n(\d+)", text)),
         "FV per unit": "",
-        "Price": float(grab(r"Price\s+([\d.]+)", text)),
-        "SELLER CONSIDERATION": float(
-            grab(r"Actual Consideration\s+([\d,]+\.\d+)", text).replace(",", "")
+        "Price": safe_float(grab(r"Price\s+([\d.]+)", text)),
+        "SELLER CONSIDERATION": safe_float(
+            grab(r"Actual Consideration\s+([\d,]+\.\d+)", text)
         ),
-        "BUYER CONSIDERATION": float(
-            grab(r"Consideration Reported.*?\n([\d,]+\.\d+)", text).replace(",", "")
+        "BUYER CONSIDERATION": safe_float(
+            grab(r"Consideration Reported.*?\n([\d,]+\.\d+)", text)
         ),
-        "YIELD(%)": float(grab(r"Yield\s+([\d.]+)", text)),
+        "YIELD(%)": safe_float(grab(r"Yield\s+([\d.]+)", text)),
     }
+
 
 uploaded_files = st.file_uploader(
     "Upload deal slip PDFs (BSE + CBRICS mixed)",
