@@ -13,7 +13,10 @@ st.title("📄 Bond Deal Slip → 📊 Excel")
 st.caption("Supports mixed BSE (NDS-RST) and CBRICS deal slips")
 
 def grab(pattern, text):
-    def safe_float(val):
+    m = re.search(pattern, text, re.DOTALL)
+    return m.group(1).strip() if m else ""
+
+def safe_float(val):
     try:
         return float(val.replace(",", ""))
     except:
@@ -25,10 +28,13 @@ def safe_int(val):
     except:
         return ""
 
-
 def parse_bse(text):
-    trade_value = float(grab(r"TRADE VALUE\s+([\d.]+)", text))
-    quantity = int(grab(r"QUANTITY\s+(\d+)", text))
+    trade_value = safe_float(grab(r"TRADE VALUE\s+([\d.]+)", text))
+    quantity = safe_int(grab(r"QUANTITY\s+(\d+)", text))
+
+    fv = ""
+    if trade_value and quantity:
+        fv = round(trade_value / quantity, 2)
 
     return {
         "Deal Reference": grab(r"DEAL ID\s+(\S+)", text),
@@ -37,15 +43,14 @@ def parse_bse(text):
         "Bond": grab(r"ISSUER NAME\s+(.+)", text),
         "ISIN": grab(r"ISIN\s+(\S+)", text),
         "Quantity": quantity,
-        "FV per unit": round(trade_value / quantity, 2),
-        "Price": float(grab(r"PRICE\s+([\d.]+)", text)),
-        "SELLER CONSIDERATION": float(grab(r"SELLER CONSIDERATION\s+([\d.]+)", text)),
-        "BUYER CONSIDERATION": float(grab(r"BUYER CONSIDERATION\s+([\d.]+)", text)),
-        "YIELD(%)": float(grab(r"YIELD\(%\)\s+([\d.]+)", text)),
+        "FV per unit": fv,
+        "Price": safe_float(grab(r"PRICE\s+([\d.]+)", text)),
+        "SELLER CONSIDERATION": safe_float(grab(r"SELLER CONSIDERATION\s+([\d.]+)", text)),
+        "BUYER CONSIDERATION": safe_float(grab(r"BUYER CONSIDERATION\s+([\d.]+)", text)),
+        "YIELD(%)": safe_float(grab(r"YIELD\(%\)\s+([\d.]+)", text)),
     }
 
 def parse_cbrics(text):
-   def parse_cbrics(text):
     return {
         "Deal Reference": grab(r"CBRICS Transaction Id\s+(\d+)", text),
         "Buyer": grab(r"Participant\s+([A-Z0-9]+)", text),
@@ -63,7 +68,6 @@ def parse_cbrics(text):
         ),
         "YIELD(%)": safe_float(grab(r"Yield\s+([\d.]+)", text)),
     }
-
 
 uploaded_files = st.file_uploader(
     "Upload deal slip PDFs (BSE + CBRICS mixed)",
