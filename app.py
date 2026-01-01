@@ -49,23 +49,39 @@ def parse_bse(text):
         "YIELD(%)": safe_float(grab(r"YIELD\(%\)\s+([\d.]+)", text)),
     }
 
-# -------------------- CBRICS PARSER --------------------
+# -------------------- CBRICS PARSER (FIXED) --------------------
 def parse_cbrics(text):
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+    def value_after(label):
+        for i, l in enumerate(lines):
+            if label.lower() in l.lower():
+                if i + 1 < len(lines):
+                    return lines[i + 1]
+        return ""
+
     return {
         "Deal Reference": grab(r"CBRICS Transaction Id\s+(\d+)", text),
+
         "Buyer": grab(r"Participant\s+([A-Z0-9]+)", text),
         "Seller": grab(r"Counter Party\s+([A-Z0-9]+)", text),
-        "Bond": grab(r"Description\s+(.+)", text),
+
+        "Bond": value_after("Description"),
         "ISIN": grab(r"ISIN\s+(\S+)", text),
-        "Quantity": safe_int(grab(r"No\. Of Bond.*?\n(\d+)", text)),
+
+        "Quantity": safe_int(value_after("No. Of Bond")),
         "FV per unit": "",
+
         "Price": safe_float(grab(r"Price\s+([\d.]+)", text)),
+
         "SELLER CONSIDERATION": safe_float(
             grab(r"Actual Consideration\s+([\d,]+\.\d+)", text)
         ),
+
         "BUYER CONSIDERATION": safe_float(
-            grab(r"Consideration Reported.*?\n([\d,]+\.\d+)", text)
+            grab(r"Consideration Reported\s*\(incl\. Stamp Duty\)\s*([\d,]+\.\d+)", text)
         ),
+
         "YIELD(%)": safe_float(grab(r"Yield\s+([\d.]+)", text)),
     }
 
