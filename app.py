@@ -4,10 +4,7 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.set_page_config(
-    page_title="Bond Deal Slip → Excel",
-    layout="centered"
-)
+st.set_page_config(page_title="Bond Deal Slip → Excel", layout="centered")
 
 st.title("📄 Bond Deal Slip → 📊 Excel")
 st.caption("Supports mixed BSE (NDS-RST) and CBRICS deal slips")
