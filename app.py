@@ -14,7 +14,7 @@ def grab(pattern, text):
     return m.group(1).strip() if m else ""
 
 def safe_float(val):
-    try:
+try:
         return float(val.replace(",", ""))
     except:
         return ""
