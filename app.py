@@ -1,0 +1,101 @@
+import streamlit as st
+import pdfplumber
+import pandas as pd
+import re
+from io import BytesIO
+
+st.set_page_config(
+    page_title="Bond Deal Slip → Excel",
+    layout="centered"
+)
+
+st.title("📄 Bond Deal Slip → 📊 Excel")
+st.caption("Supports mixed BSE (NDS-RST) and CBRICS deal slips")
+
+def grab(pattern, text):
+    m = re.search(pattern, text, re.DOTALL)
+    return m.group(1).strip() if m else ""
+
+def parse_bse(text):
+    trade_value = float(grab(r"TRADE VALUE\s+([\d.]+)", text))
+    quantity = int(grab(r"QUANTITY\s+(\d+)", text))
+
+    return {
+        "Deal Reference": grab(r"DEAL ID\s+(\S+)", text),
+        "Buyer": grab(r"BUYER\s+(.+)", text),
+        "Seller": grab(r"SELLER\s+(.+)", text),
+        "Bond": grab(r"ISSUER NAME\s+(.+)", text),
+        "ISIN": grab(r"ISIN\s+(\S+)", text),
+        "Quantity": quantity,
+        "FV per unit": round(trade_value / quantity, 2),
+        "Price": float(grab(r"PRICE\s+([\d.]+)", text)),
+        "SELLER CONSIDERATION": float(grab(r"SELLER CONSIDERATION\s+([\d.]+)", text)),
+        "BUYER CONSIDERATION": float(grab(r"BUYER CONSIDERATION\s+([\d.]+)", text)),
+        "YIELD(%)": float(grab(r"YIELD\(%\)\s+([\d.]+)", text)),
+    }
+
+def parse_cbrics(text):
+    return {
+        "Deal Reference": grab(r"CBRICS Transaction Id\s+(\d+)", text),
+        "Buyer": grab(r"Participant\s+([A-Z0-9]+)", text),
+        "Seller": grab(r"Counter Party\s+([A-Z0-9]+)", text),
+        "Bond": grab(r"Description\s+(.+)", text),
+        "ISIN": grab(r"ISIN\s+(\S+)", text),
+        "Quantity": int(grab(r"No\. Of Bond.*?\n(\d+)", text)),
+        "FV per unit": "",
+        "Price": float(grab(r"Price\s+([\d.]+)", text)),
+        "SELLER CONSIDERATION": float(
+            grab(r"Actual Consideration\s+([\d,]+\.\d+)", text).replace(",", "")
+        ),
+        "BUYER CONSIDERATION": float(
+            grab(r"Consideration Reported.*?\n([\d,]+\.\d+)", text).replace(",", "")
+        ),
+        "YIELD(%)": float(grab(r"Yield\s+([\d.]+)", text)),
+    }
+
+uploaded_files = st.file_uploader(
+    "Upload deal slip PDFs (BSE + CBRICS mixed)",
+    type=["pdf"],
+    accept_multiple_files=True
+)
+
+if uploaded_files:
+    st.write(f"📂 {len(uploaded_files)} files ready")
+
+    col1, col2 = st.columns(2)
+    generate = col1.button("Generate Excel")
+    clear = col2.button("Clear All")
+
+    if clear:
+        st.experimental_rerun()
+
+    if generate:
+        rows = []
+
+        for pdf in uploaded_files:
+            with pdfplumber.open(pdf) as p:
+                text = "\n".join(
+                    page.extract_text()
+                    for page in p.pages
+                    if page.extract_text()
+                )
+
+            if "CBRICS - CORPORATE BOND REPORTING" in text:
+                rows.append(parse_cbrics(text))
+            else:
+                rows.append(parse_bse(text))
+
+        df = pd.DataFrame(rows)
+
+        output = BytesIO()
+        df.to_excel(output, index=False, engine="openpyxl")
+        output.seek(0)
+
+        st.success("Excel generated successfully")
+
+        st.download_button(
+            "⬇️ Download Excel",
+            data=output,
+            file_name="Bond_Deal_Slips.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
