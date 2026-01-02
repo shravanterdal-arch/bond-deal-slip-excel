@@ -3,11 +3,12 @@ import pdfplumber
 import pandas as pd
 import re
 from io import BytesIO
-from pdf2image import convert_from_bytes
-import pytesseract
+from docx import Document
 
+# ---------------- PAGE ----------------
 st.set_page_config(page_title="Bond Deal Slip → Excel", layout="centered")
 st.title("📄 Bond Deal Slip → 📊 Excel")
+st.caption("BSE (PDF) + CBRICS (Word) supported")
 
 # ---------------- HELPERS ----------------
 def grab(pattern, text):
@@ -26,15 +27,8 @@ def to_int(x):
     except:
         return ""
 
-def ocr_pdf(file_bytes):
-    images = convert_from_bytes(file_bytes)
-    text = ""
-    for img in images:
-        text += pytesseract.image_to_string(img)
-    return text
-
-# ---------------- BSE ----------------
-def parse_bse(text):
+# ---------------- BSE (PDF) ----------------
+def parse_bse_pdf(text):
     trade_value = to_float(grab(r"TRADE VALUE\s+([\d.]+)", text))
     qty = to_int(grab(r"QUANTITY\s+(\d+)", text))
 
@@ -56,32 +50,49 @@ def parse_bse(text):
         "YIELD(%)": to_float(grab(r"YIELD\(%\)\s+([\d.]+)", text)),
     }
 
-# ---------------- CBRICS (OCR) ----------------
-def parse_cbrics(file_bytes):
-    text = ocr_pdf(file_bytes)
+# ---------------- CBRICS (WORD) ----------------
+def parse_cbrics_docx(file):
+    doc = Document(file)
+    rows = {}
 
-    return {
-        "Deal Reference": grab(r"CBRICS Transaction Id\s*[:\-]?\s*(\d+)", text),
-        "Buyer": grab(r"Participant\s*[:\-]?\s*([A-Z ]+)", text),
-        "Seller": grab(r"Counter Party\s*[:\-]?\s*([A-Z ]+)", text),
-        "Bond": grab(r"Description\s*[:\-]?\s*(.+)", text),
-        "ISIN": grab(r"ISIN\s*[:\-]?\s*(\S+)", text),
-        "Quantity": to_int(grab(r"No\.?\s*Of\s*Bond\s*[:\-]?\s*(\d+)", text)),
-        "FV per unit": "",
-        "Price": to_float(grab(r"Price\s*[:\-]?\s*([\d.]+)", text)),
-        "SELLER CONSIDERATION": to_float(
-            grab(r"Actual Consideration\s*[:\-]?\s*([\d,\.]+)", text)
-        ),
-        "BUYER CONSIDERATION": to_float(
-            grab(r"Consideration Reported.*?\s([\d,\.]+)", text)
-        ),
-        "YIELD(%)": to_float(grab(r"Yield\s*[:\-]?\s*([\d.]+)", text)),
-    }
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [c.text.strip() for c in row.cells]
+            if len(cells) < 2:
+                continue
+
+            key = cells[0].lower()
+            val = cells[1]
+
+            if "transaction id" in key:
+                rows["Deal Reference"] = val
+            elif "participant" in key:
+                rows["Buyer"] = val
+            elif "counter party" in key:
+                rows["Seller"] = val
+            elif "description" in key:
+                rows["Bond"] = val
+            elif "isin" in key:
+                rows["ISIN"] = val
+            elif "no. of bond" in key:
+                rows["Quantity"] = to_int(val)
+            elif "price" in key:
+                rows["Price"] = to_float(val)
+            elif "actual consideration" in key:
+                rows["SELLER CONSIDERATION"] = to_float(val)
+            elif "consideration reported" in key:
+                rows["BUYER CONSIDERATION"] = to_float(val)
+            elif "yield" in key:
+                rows["YIELD(%)"] = to_float(val)
+
+    rows["FV per unit"] = ""
+
+    return rows
 
 # ---------------- UI ----------------
 uploaded_files = st.file_uploader(
-    "Upload deal slip PDFs (BSE + CBRICS mixed)",
-    type=["pdf"],
+    "Upload BSE PDFs and CBRICS Word files",
+    type=["pdf", "docx"],
     accept_multiple_files=True
 )
 
@@ -90,15 +101,15 @@ if uploaded_files:
         rows = []
 
         for f in uploaded_files:
-            file_bytes = f.read()
+            if f.name.lower().endswith(".pdf"):
+                with pdfplumber.open(f) as pdf:
+                    text = "\n".join(
+                        page.extract_text() or "" for page in pdf.pages
+                    )
+                rows.append(parse_bse_pdf(text))
 
-            with pdfplumber.open(BytesIO(file_bytes)) as pdf:
-                text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-
-            if "CBRICS" in text.upper():
-                rows.append(parse_cbrics(file_bytes))
-            else:
-                rows.append(parse_bse(text))
+            elif f.name.lower().endswith(".docx"):
+                rows.append(parse_cbrics_docx(f))
 
         df = pd.DataFrame(rows)
 
