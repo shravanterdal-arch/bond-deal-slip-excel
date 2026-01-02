@@ -2,6 +2,4 @@ streamlit
 pdfplumber
 pandas
 openpyxl
-pytesseract
-pdf2image
-Pillow
+python-docx
