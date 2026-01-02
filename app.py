@@ -4,36 +4,35 @@ import pandas as pd
 import re
 from io import BytesIO
 
-# -------------------- PAGE SETUP --------------------
+# ---------------- PAGE ----------------
 st.set_page_config(page_title="Bond Deal Slip → Excel", layout="centered")
 st.title("📄 Bond Deal Slip → 📊 Excel")
-st.caption("Supports mixed BSE (NDS-RST) and CBRICS deal slips")
 
-# -------------------- HELPERS --------------------
+# ---------------- HELPERS ----------------
 def grab(pattern, text):
     m = re.search(pattern, text, re.DOTALL)
     return m.group(1).strip() if m else ""
 
-def safe_float(val):
+def to_float(x):
     try:
-        return float(val.replace(",", ""))
+        return float(x.replace(",", ""))
     except:
         return ""
 
-def safe_int(val):
+def to_int(x):
     try:
-        return int(val)
+        return int(x)
     except:
         return ""
 
-# -------------------- BSE PARSER --------------------
+# ---------------- BSE ----------------
 def parse_bse(text):
-    trade_value = safe_float(grab(r"TRADE VALUE\s+([\d.]+)", text))
-    quantity = safe_int(grab(r"QUANTITY\s+(\d+)", text))
+    trade_value = to_float(grab(r"TRADE VALUE\s+([\d.]+)", text))
+    qty = to_int(grab(r"QUANTITY\s+(\d+)", text))
 
     fv = ""
-    if trade_value and quantity:
-        fv = round(trade_value / quantity, 2)
+    if trade_value and qty:
+        fv = round(trade_value / qty, 2)
 
     return {
         "Deal Reference": grab(r"DEAL ID\s+(\S+)", text),
@@ -41,51 +40,69 @@ def parse_bse(text):
         "Seller": grab(r"SELLER\s+(.+)", text),
         "Bond": grab(r"ISSUER NAME\s+(.+)", text),
         "ISIN": grab(r"ISIN\s+(\S+)", text),
-        "Quantity": quantity,
+        "Quantity": qty,
         "FV per unit": fv,
-        "Price": safe_float(grab(r"PRICE\s+([\d.]+)", text)),
-        "SELLER CONSIDERATION": safe_float(grab(r"SELLER CONSIDERATION\s+([\d.]+)", text)),
-        "BUYER CONSIDERATION": safe_float(grab(r"BUYER CONSIDERATION\s+([\d.]+)", text)),
-        "YIELD(%)": safe_float(grab(r"YIELD\(%\)\s+([\d.]+)", text)),
+        "Price": to_float(grab(r"PRICE\s+([\d.]+)", text)),
+        "SELLER CONSIDERATION": to_float(grab(r"SELLER CONSIDERATION\s+([\d.]+)", text)),
+        "BUYER CONSIDERATION": to_float(grab(r"BUYER CONSIDERATION\s+([\d.]+)", text)),
+        "YIELD(%)": to_float(grab(r"YIELD\(%\)\s+([\d.]+)", text)),
     }
 
-# -------------------- CBRICS PARSER (FIXED) --------------------
-def parse_cbrics(text):
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+# ---------------- CBRICS (TABLE-BASED) ----------------
+def parse_cbrics(pdf):
+    text = "\n".join(
+        page.extract_text() or "" for page in pdf.pages
+    )
 
-    def value_after(label):
-        for i, l in enumerate(lines):
-            if label.lower() in l.lower():
-                if i + 1 < len(lines):
-                    return lines[i + 1]
-        return ""
+    tables = []
+    for page in pdf.pages:
+        try:
+            tables += page.extract_tables()
+        except:
+            pass
+
+    # Defaults
+    buyer = seller = bond = isin = ""
+    qty = price = ytm = buyer_cons = seller_cons = ""
+    deal_ref = grab(r"CBRICS Transaction Id\s+(\d+)", text)
+
+    # Text-safe fields
+    isin = grab(r"ISIN\s+(\S+)", text)
+    bond = grab(r"Description\s+(.+)", text)
+    buyer = grab(r"Participant\s+([A-Z0-9]+)", text)
+    seller = grab(r"Counter Party\s+([A-Z0-9]+)", text)
+    price = to_float(grab(r"Price\s+([\d.]+)", text))
+    ytm = to_float(grab(r"Yield\s+([\d.]+)", text))
+
+    # Table-driven fields (reliable)
+    for table in tables:
+        for row in table:
+            row_text = " ".join([c or "" for c in row]).lower()
+
+            if "no. of bond" in row_text:
+                qty = to_int(row[0]) or to_int(row[-1])
+
+            if "consideration reported" in row_text:
+                buyer_cons = to_float(row[-1])
+
+            if "actual consideration" in row_text:
+                seller_cons = to_float(row[-1])
 
     return {
-        "Deal Reference": grab(r"CBRICS Transaction Id\s+(\d+)", text),
-
-        "Buyer": grab(r"Participant\s+([A-Z0-9]+)", text),
-        "Seller": grab(r"Counter Party\s+([A-Z0-9]+)", text),
-
-        "Bond": value_after("Description"),
-        "ISIN": grab(r"ISIN\s+(\S+)", text),
-
-        "Quantity": safe_int(value_after("No. Of Bond")),
+        "Deal Reference": deal_ref,
+        "Buyer": buyer,
+        "Seller": seller,
+        "Bond": bond,
+        "ISIN": isin,
+        "Quantity": qty,
         "FV per unit": "",
-
-        "Price": safe_float(grab(r"Price\s+([\d.]+)", text)),
-
-        "SELLER CONSIDERATION": safe_float(
-            grab(r"Actual Consideration\s+([\d,]+\.\d+)", text)
-        ),
-
-        "BUYER CONSIDERATION": safe_float(
-            grab(r"Consideration Reported\s*\(incl\. Stamp Duty\)\s*([\d,]+\.\d+)", text)
-        ),
-
-        "YIELD(%)": safe_float(grab(r"Yield\s+([\d.]+)", text)),
+        "Price": price,
+        "SELLER CONSIDERATION": seller_cons,
+        "BUYER CONSIDERATION": buyer_cons,
+        "YIELD(%)": ytm,
     }
 
-# -------------------- UI --------------------
+# ---------------- UI ----------------
 uploaded_files = st.file_uploader(
     "Upload deal slip PDFs (BSE + CBRICS mixed)",
     type=["pdf"],
@@ -93,42 +110,29 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
-    st.write(f"📂 {len(uploaded_files)} files ready")
-
-    col1, col2 = st.columns(2)
-    generate = col1.button("Generate Excel")
-    clear = col2.button("Clear All")
-
-    if clear:
-        st.experimental_rerun()
-
-    if generate:
+    if st.button("Generate Excel"):
         rows = []
 
-        for pdf in uploaded_files:
-            with pdfplumber.open(pdf) as p:
+        for f in uploaded_files:
+            with pdfplumber.open(f) as pdf:
                 text = "\n".join(
-                    page.extract_text()
-                    for page in p.pages
-                    if page.extract_text()
+                    page.extract_text() or "" for page in pdf.pages
                 )
 
-            if "CBRICS - CORPORATE BOND REPORTING" in text:
-                rows.append(parse_cbrics(text))
-            else:
-                rows.append(parse_bse(text))
+                if "CBRICS - CORPORATE BOND REPORTING" in text:
+                    rows.append(parse_cbrics(pdf))
+                else:
+                    rows.append(parse_bse(text))
 
         df = pd.DataFrame(rows)
 
-        output = BytesIO()
-        df.to_excel(output, index=False, engine="openpyxl")
-        output.seek(0)
-
-        st.success("Excel generated successfully")
+        out = BytesIO()
+        df.to_excel(out, index=False, engine="openpyxl")
+        out.seek(0)
 
         st.download_button(
             "⬇️ Download Excel",
-            data=output,
+            data=out,
             file_name="Bond_Deal_Slips.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
