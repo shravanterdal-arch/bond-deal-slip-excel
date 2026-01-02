@@ -45,7 +45,12 @@ def parse_bse(text):
         "Price": to_float(grab(r"PRICE\s+([\d.]+)", text)),
         "SELLER CONSIDERATION": to_float(grab(r"SELLER CONSIDERATION\s+([\d.]+)", text)),
         "BUYER CONSIDERATION": to_float(grab(r"BUYER CONSIDERATION\s+([\d.]+)", text)),
-        "YIELD(%)": to_float(grab(r"YIELD\(%\)\s+([\d.]+)", text)),
+        "YIELD(%)": (
+    grab(r"YIELD\(%\)\s+([\d.]+)", text) + "%"
+    if grab(r"YIELD\(%\)\s+([\d.]+)", text)
+    else ""
+),
+
     }
 
 # ---------------- UI ----------------
